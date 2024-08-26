@@ -15,8 +15,10 @@ Suggests: knitr,
 VignetteBuilder: knitr
 Depends: 
     sf,
+    dplyr,
+    tidyr,
     R (>= 2.10)
-Imports: ggplot2,dplyr, lidR,
+Imports: ggplot2, lidR,
     raster,
     sp,
     xml2,

@@ -52,7 +52,7 @@ zenodo_url <- function(concept_rec_id = 3723356, rec_version = "latest",
   url <- paste0("https://zenodo.org/api/records/", rec_id)
   res <- httr::GET(url)
   httr::stop_for_status(res)
-  httr::content(res)$files[[1]]$links$download
+  httr::content(res)$files[[1]]$links[[1]]
 }
 
 #' @rdname zenodo_url
@@ -67,10 +67,34 @@ zenodo_versions <- function(concept_rec_id, arg_checks = TRUE){
   cont <- httr::content(res)
   nv <- length(cont)
   vers <- rep(NA, nv)
-  recid <- rep(NA, nv)
+  # set up blank tibble for filling
+  df <- dplyr::tibble(
+      version = character(0),
+      rec_id = character(0)
+    ) 
   for(i in 1:nv){
-    vers[i] <- cont[[i]]$metadata$version
-    recid[i] <- cont[[i]]$record_id
+    # convert list to tibble
+    cont_df <- cont[[1]]$hits %>% 
+      unlist() %>% # collapse messy list
+      stack() %>% # convert to data frame
+      dplyr::as_tibble() %>% # convert to tibble
+      dplyr::group_by(ind) %>% # get list order by name of parameter
+      dplyr::mutate(n = dplyr::row_number())
+    
+    # get the columns needed... NOTE THE CHANGES
+      # record_id ... now known as recid
+      # metadata$version ... now known as metadata.version
+    cont_df <- cont_df %>% 
+      dplyr::filter(ind %in% c("recid", "metadata.version")) %>% # keep only the record and version
+      tidyr::pivot_wider(names_from = ind, values_from = values) %>% # pivot wider
+      dplyr::rename(version = metadata.version, rec_id = recid) %>% # rename
+      dplyr::select(version, rec_id, n)
+    
+    # bind the rows
+    if(nrow(cont_df)>0){
+      df <- dplyr::bind_rows(df, cont_df)
+    }
   }
-  data.frame(version = vers, rec_id = recid)
+  # return it dropping duplicates
+  return( dplyr::distinct(df) )
 }
