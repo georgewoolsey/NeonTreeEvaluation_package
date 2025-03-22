@@ -76,8 +76,8 @@ process_plot<-function(predictions, plot_name, image_name, show){
   r<-raster::stack(rgb_path)
 
   #Field data, min height threshold is 3.
-  field_points<-field %>% filter(plotID==plot_name) %>%
-    sf::st_as_sf(.,coords=c("itcEasting","itcNorthing")) %>% filter(height>3)
+  field_points<-field %>% dplyr::filter(plotID==plot_name) %>%
+    sf::st_as_sf(.,coords=c("itcEasting","itcNorthing")) %>% dplyr::filter(height>3)
 
   sf::st_crs(field_points)<-raster::crs(r)
 
@@ -90,12 +90,19 @@ process_plot<-function(predictions, plot_name, image_name, show){
   is_polygons = any(class(predictions) == "sf")
   #If is_polygons, project must be true
   if(is_polygons){
-    spatial_boxes <- sf_to_spatial_polygons(predictions, r)
+    spatial_boxes <- predictions %>%
+      dplyr::mutate(crown_id = dplyr::row_number()) %>%
+      sf::st_set_crs(raster::crs(r))
   } else{
-    spatial_boxes<- predictions %>%
-      NeonTreeEvaluation::boxes_to_spatial_polygons(.,r) %>%
-      sf::st_as_sf() %>%
-      mutate(height=predictions$height, score=predictions$score)
+    spatial_boxes <-
+      predictions %>%
+      dplyr::mutate(crown_id = dplyr::row_number()) %>%
+      dplyr::select(crown_id,xmin,ymin,xmax,ymax) %>%
+      dplyr::rowwise(crown_id) %>% # key to using bbox_poly()
+      dplyr::mutate(geometry = bbox_poly(xmin,ymin,xmax,ymax)) %>%
+      dplyr::ungroup() %>%
+      sf::st_set_geometry("geometry") %>%
+      sf::st_set_crs(raster::crs(r))
   }
 
   #Filter the field data for erroneous temporal connections, the CHM must have positive heights, see OSBS_022, can use as an example of all sorts of challenges.
@@ -113,7 +120,7 @@ process_plot<-function(predictions, plot_name, image_name, show){
 
   #Could it be seen?
   field_points<-field_points %>%
-    filter(abs(CHM_height-height)<4)
+    dplyr::filter(abs(CHM_height-height)<4)
 
   #if no points left, skip plot
   if(nrow(field_points) == 0){
@@ -123,13 +130,13 @@ process_plot<-function(predictions, plot_name, image_name, show){
   #Min height based on the predictions
   #field_points<-field_points[field_points$height > quantile(spatial_boxes$height,0.01),]
   unique_locations<-field_points %>%
-    distinct(individualID,.keep_all = T)
+    dplyr::distinct(individualID,.keep_all = T)
 
   joined <- sf::st_join(unique_locations, spatial_boxes)
-  joined <- joined %>% filter(!is.na(crown_id)) %>%
-    group_by(crown_id) %>% slice(1)
+  joined <- joined %>% dplyr::filter(!is.na(crown_id)) %>%
+    dplyr::group_by(crown_id) %>% dplyr::slice(1)
 
-  missing <- unique_locations %>% filter(!uid %in% joined$uid)
+  missing <- unique_locations %>% dplyr::filter(!uid %in% joined$uid)
 
   if(show){
     raster::plotRGB(r)
@@ -151,14 +158,14 @@ process_plot<-function(predictions, plot_name, image_name, show){
   #unique matches
   joined_df<-sf::st_join(spatial_boxes,unique_locations)
   single_matches<-joined_df %>%
-    group_by(crown_id) %>%
-    filter(height == max(height))
+    dplyr::group_by(crown_id) %>%
+    dplyr::filter(height == max(height))
 
   single_recall<-nrow(single_matches)/nrow(unique_locations)
 
   #Create point matches between data and predictions
   matched_df<-matched_pairs(spatial_boxes, field_points) %>%
-    mutate(plot_name=plot_name)
+    dplyr::mutate(plot_name=plot_name)
 
   if(nrow(matched_df)>0){
     siteID=unique(matched_df$siteID)
@@ -172,16 +179,16 @@ process_plot<-function(predictions, plot_name, image_name, show){
 
 clean_field_data<-function(field){
   field$area<-field$maxCrownDiameter*field$ninetyCrownDiameter
-  field<-field %>%  filter(!is.na(itcEasting),!stringr::str_detect(eventID,"2014"),growthForm %in% c("single bole tree","multi-bole tree","small tree","sapling"),stemDiameter>15) %>%
+  field<-field %>%  dplyr::filter(!is.na(itcEasting),!stringr::str_detect(eventID,"2014"),growthForm %in% c("single bole tree","multi-bole tree","small tree","sapling"),stemDiameter>15) %>%
     droplevels() %>%
-    filter(height>3|is.na(height))
+    dplyr::filter(height>3|is.na(height))
 
   #Limit difference in heights
-  to_remove<-field %>% group_by(individualID) %>%
-    summarize(mean=mean(height),sum_difference = abs(sum(diff(height)))) %>%
-    filter(sum_difference > 8)
+  to_remove<-field %>% dplyr::group_by(individualID) %>%
+    dplyr::summarize(mean=mean(height),sum_difference = abs(sum(diff(height)))) %>%
+    dplyr::filter(sum_difference > 8)
   field<-field %>%
-    filter(!individualID %in% to_remove$individualID)
+    dplyr::filter(!individualID %in% to_remove$individualID)
 }
 
 matched_pairs<-function(spatial_boxes,field_points){
@@ -191,15 +198,24 @@ matched_pairs<-function(spatial_boxes,field_points){
 
   #If there are heights, take the tallest height
   tallest_points<-possible_matches %>%
-    group_by(crown_id) %>%
-    mutate(height_diff= CHM_height - height) %>%
-    arrange(height_diff) %>% slice(1)  %>%
+    dplyr::group_by(crown_id) %>%
+    dplyr::mutate(height_diff= CHM_height - height) %>%
+    dplyr::arrange(height_diff) %>% dplyr::slice(1)  %>%
     as.data.frame() %>%
     dplyr::select(crown_id, individualID)
 
-  matched_height<-possible_matches %>% inner_join(tallest_points)
+  matched_height<-possible_matches %>% dplyr::inner_join(tallest_points)
 
   return(matched_height)
 }
-
+# takes the input of a bbox object ( e.g. as from sf::st_bbox() ) and returns a polygon
+bbox_poly <- function(xmin,ymin,xmax,ymax) {
+  # points
+  lower_left_pt <- sf::st_point(c(xmin,ymin))
+  upper_right_pt <- sf::st_point(c(xmax,ymax))
+  # to bbox polygon
+  sf::st_sfc(lower_left_pt, upper_right_pt) %>%
+    sf::st_bbox() %>%
+    sf::st_as_sfc()
+}
 
