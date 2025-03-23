@@ -1,7 +1,7 @@
 Package: NeonTreeEvaluation
 Type: Package
 Title: Evaluate Individual Tree Segmentation Algorithms against Benchmark Data
-Version: 0.1.0
+Version: 0.1.1
 Author: Ben Weinstein, University of Florida
 Maintainer: <ben.weinstein@weecology.org>
 Description: A benchmark dataset and evaluation routine for individual tree crown detection.  
