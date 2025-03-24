@@ -35,11 +35,11 @@ evaluate_field_stems<-function(predictions,project=TRUE, show=T, summarize=T){
   check_download()
   field = clean_field_data(NeonTreeEvaluation::field)
 
-  site_plots<-field %>% group_by(plotID,individualID) %>%
-    summarize(samples=length(unique(eventID))) %>%
-    filter(samples>1) %>%
-    ungroup() %>%
-    mutate(plotID=as.character(plotID))
+  site_plots<-field %>% dplyr::group_by(plotID,individualID) %>%
+    dplyr::summarize(samples=length(unique(eventID))) %>%
+    dplyr::filter(samples>1) %>%
+    dplyr::ungroup() %>%
+    dplyr::mutate(plotID=as.character(plotID))
 
   results<-list()
   plot_names <- unique(site_plots$plotID)
@@ -51,19 +51,22 @@ evaluate_field_stems<-function(predictions,project=TRUE, show=T, summarize=T){
   for(image_name in plots_to_run){
     plot_name = stringr::str_match(image_name,"(\\w+)_\\d+")[,2]
     print(plot_name)
-    plot_predictions <- predictions %>% filter(plot_name == image_name)
+    plot_predictions <- predictions %>% dplyr::filter(plot_name == image_name)
     results[[plot_name]]<-process_plot(predictions=plot_predictions,plot_name=plot_name, show=show, image_name=image_name)
   }
   results<-results[!sapply(results,is.null)]
-  results<-bind_rows(results)
+  results<-dplyr::bind_rows(results)
 
-  if(summarize){
+  if(summarize & nrow(results)>0){
     df <-list()
     df[["overall"]] <- results %>% summarize(recall=mean(recall))
     df[["by_site"]] <- results %>% group_by(Site=siteID) %>% summarize(recall=mean(recall))
     df[["plot_level"]] <-results
     return(df)
-  } else{
+  }else if(summarize){
+    warning( paste("No predictions made for plots: ", paste(plots_to_run,collapse = ",")) )
+    return(NULL)
+  }else{
     return(results)
   }
 }
@@ -171,7 +174,12 @@ process_plot<-function(predictions, plot_name, image_name, show){
     siteID=unique(matched_df$siteID)
     result<-data.frame(siteID=siteID,plot_name=plot_name,recall=single_recall, n=nrow(unique_locations))
     return(result)
-  } else{
+  }else if(nrow(unique_locations)>0){
+    # allows for recall=0 if there are ground truth trees and no predictions match
+    siteID=unique(field_points$siteID)[1]
+    result<-data.frame(siteID=siteID,plot_name=plot_name,recall=0, n=nrow(unique_locations))
+    return(result)
+  }else{
     warning(paste("No matching prediction between  data found made for plot",plot_name))
     return(NULL)
   }
